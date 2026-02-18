@@ -97,3 +97,4 @@ try:
 except Exception as e:
 
     st.error(f"Erro ao conectar! Verifique se:\n1. O link da planilha está correto no código.\n2. A planilha está compartilhada como 'Qualquer pessoa com o link'.\n3. As abas se chamam exatamente CONFIG, BRAIN e ADS.\n\nDetalhe do erro: {e}")
+

@@ -9,7 +9,7 @@ st.set_page_config(page_title="NEXUS | Executive View", layout="wide", page_icon
 # ==================================================
 # ⚠️ COLE O LINK DA SUA PLANILHA AQUI EMBAIXO:
 # ==================================================
-url_planilha = "COLE_O_LINK_DA_SUA_PLANILHA_DO_GOOGLE_AQUI"
+url_planilha = "https://docs.google.com/spreadsheets/d/1nAz050dC3riITBhgvNvOM4wGSYtfE5ED/edit?usp=sharing&ouid=111439950490476718855&rtpof=true&sd=true"
 
 # --- ESTILO (CAVE MODE) ---
 st.markdown("""
@@ -95,4 +95,5 @@ try:
     st.dataframe(df_b_f.style.background_gradient(subset=['NET PROFIT'], cmap='RdYlGn'), use_container_width=True)
 
 except Exception as e:
+
     st.error(f"Erro ao conectar! Verifique se:\n1. O link da planilha está correto no código.\n2. A planilha está compartilhada como 'Qualquer pessoa com o link'.\n3. As abas se chamam exatamente CONFIG, BRAIN e ADS.\n\nDetalhe do erro: {e}")

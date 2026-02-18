@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAÇÃO ---
+# --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="NEXUS | Executive View", layout="wide", page_icon="🚀")
 
 # ==================================================
@@ -23,26 +23,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- CONEXÃO ---
-# Cria a conexão com o Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=60) # O site recarrega os dados do Google a cada 60 segundos
+@st.cache_data(ttl=60)
 def load_data():
-    # Lê as 4 abas da planilha pelo link
-    # O parametro usecols e header ajudam a garantir a leitura correta
+    # CONFIG: O cabeçalho está na linha 1 (padrão)
     df_c = conn.read(spreadsheet=url_planilha, worksheet="CONFIG")
-    df_b = conn.read(spreadsheet=url_planilha, worksheet="BRAIN")
-    df_a = conn.read(spreadsheet=url_planilha, worksheet="ADS")
-    # df_f = conn.read(spreadsheet=url_planilha, worksheet="FUNNEL") # Opcional se usar funil
+    
+    # DADOS: O cabeçalho está na linha 3 (index 2), pois temos 2 linhas de estilo antes
+    df_b = conn.read(spreadsheet=url_planilha, worksheet="BRAIN", header=2)
+    df_a = conn.read(spreadsheet=url_planilha, worksheet="ADS", header=2)
+    
     return df_c, df_b, df_a
 
 try:
     df_config, df_brain, df_ads = load_data()
     
-    # Tratamento básico de datas (garante que o pandas entenda que é data)
+    # --- TRATAMENTO DE ERROS DE LEITURA ---
+    # Se a planilha tiver colunas vazias extras, removemos
+    df_brain = df_brain.loc[:, ~df_brain.columns.str.contains('^Unnamed')]
+    df_ads = df_ads.loc[:, ~df_ads.columns.str.contains('^Unnamed')]
+    
+    # Garante que a coluna DATE existe e converte
+    if 'DATE' not in df_brain.columns:
+        st.error("Erro: Não encontrei a coluna 'DATE'. Verifique se você apagou as linhas de cabeçalho da planilha.")
+        st.stop()
+        
     df_brain['DATE'] = pd.to_datetime(df_brain['DATE'])
     
-    # --- BARRA LATERAL (SIDEBAR) ---
+    # --- BARRA LATERAL ---
     st.sidebar.title("🚀 NEXUS SaaS")
     st.sidebar.success("Sistema Online")
     
@@ -51,25 +60,24 @@ try:
     max_date = df_brain['DATE'].max().date()
     rng = st.sidebar.date_input("Filtrar Período", (min_date, max_date))
     
-    # --- DASHBOARD PRINCIPAL ---
+    # --- DASHBOARD ---
     st.title("Visão Executiva")
     
-    # Filtrando os dados pela data escolhida
+    # Filtrando dados
     mask = (df_brain['DATE'].dt.date >= rng[0]) & (df_brain['DATE'].dt.date <= rng[1])
     df_b_f = df_brain.loc[mask]
     
-    # Cards Superiores (KPIs)
+    # Cards
     col1, col2, col3, col4 = st.columns(4)
     
-    rev = df_b_f['GROSS REV'].sum()
-    lucro = df_b_f['NET PROFIT'].sum()
-    ads = df_b_f['TOTAL ADS'].sum()
-    # Evita divisão por zero
+    # Tratamento para garantir que são números
+    rev = pd.to_numeric(df_b_f['GROSS REV'], errors='coerce').sum()
+    lucro = pd.to_numeric(df_b_f['NET PROFIT'], errors='coerce').sum()
+    ads = pd.to_numeric(df_b_f['TOTAL ADS'], errors='coerce').sum()
     roas = rev / ads if ads > 0 else 0
-    margin = (lucro / rev * 100) if rev > 0 else 0
     
     col1.metric("FATURAMENTO", f"R$ {rev:,.2f}")
-    col2.metric("LUCRO LÍQUIDO", f"R$ {lucro:,.2f}", f"{margin:.1f}% Margem")
+    col2.metric("LUCRO LÍQUIDO", f"R$ {lucro:,.2f}")
     col3.metric("INVESTIMENTO ADS", f"R$ {ads:,.2f}", delta="-Investimento", delta_color="inverse")
     col4.metric("ROAS GLOBAL", f"{roas:.2f}x")
     
@@ -80,21 +88,24 @@ try:
     
     with c1:
         st.subheader("Evolução Financeira")
-        # Gráfico de Barras: Lucro vs Faturamento
-        fig = px.bar(df_b_f, x='DATE', y=['GROSS REV', 'NET PROFIT'], 
-                     barmode='group', color_discrete_map={'GROSS REV': '#1877F2', 'NET PROFIT': '#00C853'})
-        fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', legend_title_text='')
-        st.plotly_chart(fig, use_container_width=True)
-        
+        if not df_b_f.empty:
+            fig = px.bar(df_b_f, x='DATE', y=['GROSS REV', 'NET PROFIT'], 
+                         barmode='group', color_discrete_map={'GROSS REV': '#1877F2', 'NET PROFIT': '#00C853'})
+            fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', legend_title_text='')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Sem dados para o período selecionado.")
+            
     with c2:
-        st.subheader("Configurações Atuais")
+        st.subheader("Parâmetros")
         st.dataframe(df_config, use_container_width=True, hide_index=True)
 
-    # Tabelas Detalhadas
-    st.subheader("Base de Dados (Brain)")
-    st.dataframe(df_b_f.style.background_gradient(subset=['NET PROFIT'], cmap='RdYlGn'), use_container_width=True)
+    # Tabelas
+    t1, t2 = st.tabs(["🧠 Financeiro Detalhado", "📢 Ads Performance"])
+    t1.dataframe(df_b_f.style.background_gradient(subset=['NET PROFIT'], cmap='RdYlGn'), use_container_width=True)
+    t2.dataframe(df_ads, use_container_width=True)
 
 except Exception as e:
-
-    st.error(f"Erro ao conectar! Verifique se:\n1. O link da planilha está correto no código.\n2. A planilha está compartilhada como 'Qualquer pessoa com o link'.\n3. As abas se chamam exatamente CONFIG, BRAIN e ADS.\n\nDetalhe do erro: {e}")
-
+    st.error("OPS! Deu erro na conexão.")
+    st.code(f"Detalhe técnico: {e}")
+    st.info("Dica: Verifique se o link da planilha foi colado dentro das aspas na linha 12.")

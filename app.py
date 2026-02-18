@@ -6,9 +6,8 @@ import plotly.express as px
 st.set_page_config(page_title="NEXUS | Executive View", layout="wide", page_icon="🚀")
 
 # ==================================================
-# SEU LINK JÁ CONFIGURADO AQUI:
+# SEU LINK (MANTENHA O MESMO QUE JÁ ESTAVA):
 # ==================================================
-# O código vai usar este ID para baixar o arquivo XLSX direto
 file_id = "1nAz050dC3riITBhgvNvOM4wGSYtfE5ED"
 url_download = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=xlsx"
 
@@ -23,67 +22,82 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNÇÃO DE LEITURA (XLSX DIRETO) ---
+# --- FUNÇÃO DE LEITURA BLINDADA ---
 @st.cache_data(ttl=60)
 def load_data_xlsx(url):
     try:
-        # Lê o arquivo Excel inteiro (todas as abas) de uma vez
         xls = pd.ExcelFile(url)
         
-        # Carrega cada aba (tratando os cabeçalhos diferentes)
-        # Aba CONFIG: Cabeçalho na linha 0
-        df_c = pd.read_excel(xls, "CONFIG")
+        # --- DEBUG: SE DER ERRO, O SITE VAI MOSTRAR QUAIS ABAS EXISTEM ---
+        st.sidebar.caption(f"Abas encontradas: {xls.sheet_names}")
         
-        # Aba BRAIN e ADS: Cabeçalho na linha 2 (pula as 2 primeiras de estilo)
-        df_b = pd.read_excel(xls, "COMPANY_BRAIN", header=2)
-        df_a = pd.read_excel(xls, "ADS_PERFORMANCE", header=2)
-        
+        # Tenta ler CONFIG (geralmente sem cabeçalho estilizado)
+        # Se não achar CONFIG, tenta pegar a primeira aba
+        if "CONFIG" in xls.sheet_names:
+            df_c = pd.read_excel(xls, "CONFIG")
+        else:
+            df_c = pd.read_excel(xls, 0) # Pega a primeira
+
+        # Tenta ler BRAIN (Procura por 'BRAIN' ou 'COMPANY_BRAIN')
+        sheet_brain = next((s for s in xls.sheet_names if "BRAIN" in s), None)
+        if sheet_brain:
+            df_b = pd.read_excel(xls, sheet_brain, header=2)
+        else:
+            st.error("ERRO: Não achei a aba BRAIN. Renomeie a aba da planilha para 'BRAIN'.")
+            st.stop()
+
+        # Tenta ler ADS (Procura por 'ADS' ou 'PERFORMANCE')
+        sheet_ads = next((s for s in xls.sheet_names if "ADS" in s), None)
+        if sheet_ads:
+            df_a = pd.read_excel(xls, sheet_ads, header=2)
+        else:
+             # Se não achar ADS, cria um vazio para não quebrar
+            df_a = pd.DataFrame() 
+
         return df_c, df_b, df_a
+
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo Excel. Detalhe: {e}")
+        st.error(f"Erro Crítico na Leitura: {e}")
         st.stop()
 
 try:
     # Carrega os dados
     df_config, df_brain, df_ads = load_data_xlsx(url_download)
     
-    # --- LIMPEZA DE DADOS ---
-    # Remove colunas vazias
+    # --- LIMPEZA ---
     df_brain = df_brain.loc[:, ~df_brain.columns.str.contains('^Unnamed')]
     
-    # Converte coluna DATE para data (se houver erro, vira NaT)
-    if 'DATE' in df_brain.columns:
-        df_brain['DATE'] = pd.to_datetime(df_brain['DATE'], errors='coerce')
-        # Remove linhas onde a data é inválida (ex: linhas vazias no fim)
+    # Validação de Data
+    # Procura coluna de data com flexibilidade (pode ser DATE ou DATA)
+    date_col = next((c for c in df_brain.columns if "DATE" in c or "DATA" in c), None)
+    
+    if date_col:
+        df_brain['DATE'] = pd.to_datetime(df_brain[date_col], errors='coerce')
         df_brain = df_brain.dropna(subset=['DATE'])
     else:
-        st.error("Coluna 'DATE' não encontrada na aba COMPANY_BRAIN.")
+        st.error(f"Não encontrei a coluna de Data. Colunas lidas: {list(df_brain.columns)}")
         st.stop()
 
     # --- BARRA LATERAL ---
     st.sidebar.title("🚀 NEXUS SaaS")
-    st.sidebar.success("Conexão XLSX Ativa")
     
-    # Filtro de Data
     if not df_brain.empty:
         min_date = df_brain['DATE'].min().date()
         max_date = df_brain['DATE'].max().date()
         rng = st.sidebar.date_input("Filtrar Período", (min_date, max_date))
     else:
-        st.warning("A planilha parece estar vazia.")
+        st.warning("Planilha vazia ou datas inválidas.")
         st.stop()
     
     # --- DASHBOARD ---
     st.title("Visão Executiva")
     
-    # Filtrando
     mask = (df_brain['DATE'].dt.date >= rng[0]) & (df_brain['DATE'].dt.date <= rng[1])
     df_b_f = df_brain.loc[mask]
     
-    # Função segura para somar valores monetários
+    # Soma segura
     def safe_sum(df, col_name):
         if col_name in df.columns:
-            # Converte para string, limpa R$ e converte para float
             return pd.to_numeric(df[col_name].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.'), errors='coerce').sum()
         return 0
 
@@ -92,41 +106,37 @@ try:
     ads = safe_sum(df_b_f, 'TOTAL ADS')
     roas = rev / ads if ads > 0 else 0
     
-    # Cards
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("FATURAMENTO", f"R$ {rev:,.2f}")
-    col2.metric("LUCRO LÍQUIDO", f"R$ {lucro:,.2f}")
-    col3.metric("INVESTIMENTO ADS", f"R$ {ads:,.2f}", delta="-Investimento", delta_color="inverse")
-    col4.metric("ROAS GLOBAL", f"{roas:.2f}x")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("FATURAMENTO", f"R$ {rev:,.2f}")
+    c2.metric("LUCRO LÍQUIDO", f"R$ {lucro:,.2f}")
+    c3.metric("INVESTIMENTO ADS", f"R$ {ads:,.2f}", delta="-Investimento", delta_color="inverse")
+    c4.metric("ROAS GLOBAL", f"{roas:.2f}x")
     
     st.markdown("---")
     
     # Gráficos
-    c1, c2 = st.columns([2, 1])
-    
-    with c1:
-        st.subheader("Evolução Financeira")
+    col_g1, col_g2 = st.columns([2, 1])
+    with col_g1:
+        st.subheader("Evolução")
         if not df_b_f.empty:
-            # Prepara dados para o gráfico (garante numérico)
+             # Limpeza para gráfico
             df_chart = df_b_f.copy()
             for col in ['GROSS REV', 'NET PROFIT']:
                 if col in df_chart.columns:
                      df_chart[col] = pd.to_numeric(df_chart[col].astype(str).str.replace('R$','').str.replace('.','').str.replace(',','.'), errors='coerce')
             
-            fig = px.bar(df_chart, x='DATE', y=['GROSS REV', 'NET PROFIT'], 
-                         barmode='group', color_discrete_map={'GROSS REV': '#1877F2', 'NET PROFIT': '#00C853'})
+            fig = px.bar(df_chart, x='DATE', y=['GROSS REV', 'NET PROFIT'], barmode='group', 
+                         color_discrete_map={'GROSS REV': '#1877F2', 'NET PROFIT': '#00C853'})
             fig.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', legend_title_text='')
             st.plotly_chart(fig, use_container_width=True)
             
-    with c2:
-        st.subheader("Parâmetros")
+    with col_g2:
+        st.subheader("Config")
         st.dataframe(df_config, use_container_width=True, hide_index=True)
 
-    # Tabelas
     t1, t2 = st.tabs(["🧠 Financeiro", "📢 Ads"])
     t1.dataframe(df_b_f, use_container_width=True)
     t2.dataframe(df_ads, use_container_width=True)
 
 except Exception as e:
-    st.error("OPS! Erro ao carregar dados.")
-    st.code(f"Erro Python: {e}")
+    st.error(f"Erro: {e}")
